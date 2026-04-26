@@ -949,6 +949,12 @@
       font-size: 12px;
     }
 
+    .table-pagination {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 14px;
+    }
+
     @media (max-width: 900px) {
       .topbar {
         padding: 0 14px;
@@ -1097,6 +1103,29 @@
       return "symbol-pill symbol-none";
     };
 
+    const useTablePagination = (sourceRows) => {
+      const currentPage = Vue.ref(1);
+      const pageSize = Vue.ref(10);
+      const total = Vue.computed(() => sourceRows.value.length);
+      const pagedRows = Vue.computed(() => {
+        const start = (currentPage.value - 1) * pageSize.value;
+        return sourceRows.value.slice(start, start + pageSize.value);
+      });
+      const ensureCurrentPage = () => {
+        const maxPage = Math.max(1, Math.ceil(total.value / pageSize.value));
+        if (currentPage.value > maxPage) currentPage.value = maxPage;
+      };
+      const handleSizeChange = (size) => {
+        pageSize.value = size;
+        currentPage.value = 1;
+      };
+      const handleCurrentChange = (page) => {
+        currentPage.value = page;
+      };
+      Vue.watch(() => total.value, ensureCurrentPage);
+      return { currentPage, pageSize, total, pagedRows, handleSizeChange, handleCurrentChange };
+    };
+
     const CaseListPage = {
       template: `
         <div class="page-card">
@@ -1220,11 +1249,20 @@
 
           <div class="case-toolbar">
             <el-button type="primary" :icon="Plus" @click="goNewCase">新規</el-button>
+            <el-button type="primary" plain :icon="Document" :disabled="!selectedCaseNo" @click="goCustomsCreate">通関書類作成</el-button>
             <div class="table-note">点击「変更」或「案件新規」将跳转到案件录入页面。</div>
           </div>
 
-          <el-table :data="rows" stripe border class="case-table" style="width: 100%">
+          <el-table :data="pagedRows" stripe border class="case-table" style="width: 100%">
             <el-table-column prop="no" label="NO" width="58" fixed="left"></el-table-column>
+            <el-table-column label="" width="58" fixed="left" align="center">
+              <template #default="scope">
+                <el-checkbox
+                  :model-value="selectedCaseNo === scope.row.caseNo"
+                  @change="toggleSelectedCase(scope.row, $event)"
+                ></el-checkbox>
+              </template>
+            </el-table-column>
             <el-table-column label="操作" width="84" fixed="left">
               <template #default="scope">
                 <div class="operation-links">
@@ -1265,11 +1303,25 @@
               </template>
             </el-table-column>
           </el-table>
+
+          <div class="table-pagination">
+            <el-pagination
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-sizes="[10, 20, 50]"
+              :total="total"
+              layout="total, sizes, prev, pager, next"
+              background
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
         </div>
       `,
       setup() {
         const router = VueRouter.useRouter();
         const collapsed = Vue.ref(true);
+        const selectedCaseNo = Vue.ref("");
         const filters = Vue.reactive({
           caseNo: "",
           etd: "",
@@ -1301,13 +1353,44 @@
 
         const shippingName = Vue.computed(() => shippingMap[(filters.shippingCode || "").trim().toUpperCase()] || "");
         const rows = Vue.ref(caseRows);
+        const pagination = useTablePagination(rows);
         const goNewCase = () => router.push("/cases/new");
+        const goCustomsCreate = () => {
+          if (!selectedCaseNo.value) {
+            ElementPlus.ElMessage.warning("案件を1件選択してください");
+            return;
+          }
+          router.push({ path: "/customs/create", query: { caseNo: selectedCaseNo.value, from: "/cases/list" } });
+        };
         const goEdit = (row) => router.push({ path: "/cases/new", query: { mode: "edit", caseNo: row.caseNo } });
         const copyCase = (row) => router.push({ path: "/cases/new", query: { mode: "copy", caseNo: row.caseNo } });
+        const toggleSelectedCase = (row, checked) => {
+          selectedCaseNo.value = checked ? row.caseNo : "";
+        };
         const viewCase = (row) => ElementPlus.ElMessage.info("照会案件：" + row.caseNo);
         const removeCase = (row) => ElementPlus.ElMessage.warning("删除为演示动作，未执行：" + row.caseNo);
 
-        return { rows, filters, shippingName, Search, Plus, Expand, Fold, goNewCase, goEdit, copyCase, viewCase, removeCase, getSymbolClass, collapsed };
+        return {
+          rows,
+          ...pagination,
+          filters,
+          shippingName,
+          selectedCaseNo,
+          Search,
+          Plus,
+          Document,
+          Expand,
+          Fold,
+          goNewCase,
+          goCustomsCreate,
+          goEdit,
+          copyCase,
+          toggleSelectedCase,
+          viewCase,
+          removeCase,
+          getSymbolClass,
+          collapsed
+        };
       }
     };
 
@@ -1336,6 +1419,9 @@
                 <div v-show="!businessCollapsed" class="business-form-grid">
                   <el-form-item label="案件番号" prop="caseNo">
                     <el-input v-model="form.caseNo"></el-input>
+                  </el-form-item>
+                  <el-form-item label="見積番号">
+                    <el-input v-model="form.quoteNo"></el-input>
                   </el-form-item>
                   <el-form-item label="案件名" prop="caseName">
                     <el-input v-model="form.caseName"></el-input>
@@ -1662,6 +1748,7 @@
         const isCopy = Vue.computed(() => mode.value === "copy");
         const form = Vue.reactive({
           caseNo: mode.value === "edit" ? source.caseNo : "R20260416001",
+          quoteNo: mode.value === "edit" || isCopy.value ? (sourceDetail.quoteNo || "QT-2026-001") : "",
           caseName: mode.value === "edit" ? (sourceDetail.caseName || "WAN HAI KOLKATA 4月案件") : isCopy.value ? (sourceDetail.caseName || "コピー案件") : "印度向け輸出案件 新規登録",
           clientNo: "TR-0098",
           clientName: isCopy.value && sourceDetail.clientName ? sourceDetail.clientName : "岩并化成株式会社",
@@ -1891,7 +1978,7 @@
             <el-tag type="danger">待审核 5 项</el-tag>
           </div>
 
-          <el-table :data="rows" border class="finance-list-table" style="width: 100%">
+          <el-table :data="pagedRows" border class="finance-list-table" style="width: 100%">
             <el-table-column prop="id" label="申请单号" width="160"></el-table-column>
             <el-table-column prop="title" label="案件标题" min-width="220"></el-table-column>
             <el-table-column prop="applicant" label="申请人" width="120"></el-table-column>
@@ -1904,6 +1991,19 @@
               </template>
             </el-table-column>
           </el-table>
+
+          <div class="table-pagination">
+            <el-pagination
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-sizes="[10, 20, 50]"
+              :total="total"
+              layout="total, sizes, prev, pager, next"
+              background
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
         </div>
       `,
       setup() {
@@ -1912,7 +2012,8 @@
           { id: "RV-260330", title: "员工竞业限制补偿纠纷", applicant: "宋泽", submittedAt: "2026-03-30 14:05", risk: "高" },
           { id: "RV-260329", title: "设备采购付款延期谈判", applicant: "刘琪", submittedAt: "2026-03-29 11:42", risk: "低" }
         ];
-        return { rows };
+        const pagination = useTablePagination(Vue.ref(rows));
+        return { rows, ...pagination };
       }
     };
 
@@ -2131,7 +2232,7 @@
             <div class="table-note">「詳細」をクリックすると、案件配下の収支明細を右側 Drawer に表示します。</div>
           </div>
 
-          <el-table :data="rows" border style="width: 100%">
+          <el-table :data="pagedRows" border style="width: 100%">
             <el-table-column prop="no" label="No." min-width="70"></el-table-column>
             <el-table-column label="操作" min-width="120">
               <template #default="scope">
@@ -2155,6 +2256,19 @@
               <template #default="scope">{{ formatPercent((scope.row.billingTotal - scope.row.paymentTotal) / scope.row.billingTotal * 100) }}</template>
             </el-table-column>
           </el-table>
+
+          <div class="table-pagination">
+            <el-pagination
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-sizes="[10, 20, 50]"
+              :total="total"
+              layout="total, sizes, prev, pager, next"
+              background
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
 
           <div class="finance-summary">
             <div class="finance-stat">
@@ -2251,6 +2365,7 @@
         const router = VueRouter.useRouter();
         const filters = Vue.reactive({ caseNo: "", owner: "", client: "", orderDate: "" });
         const rows = Vue.ref(financeCases);
+        const pagination = useTablePagination(rows);
         const drawerVisible = Vue.ref(false);
         const activeCase = Vue.ref(null);
         const totalBilling = Vue.computed(() => rows.value.reduce((sum, item) => sum + item.billingTotal, 0));
@@ -2264,6 +2379,7 @@
         return {
           filters,
           rows,
+          ...pagination,
           drawerVisible,
           activeCase,
           totalBilling,
@@ -2688,7 +2804,7 @@
             <el-button type="primary" plain @click="exportBillingList">出力</el-button>
           </div>
 
-          <el-table :data="filteredRows" border class="finance-list-table" style="width:100%">
+          <el-table :data="pagedRows" border class="finance-list-table" style="width:100%">
             <el-table-column prop="index" label="No." min-width="70">
               <template #default="scope">{{ scope.$index + 1 }}</template>
             </el-table-column>
@@ -2700,6 +2816,19 @@
             </el-table-column>
             <el-table-column prop="outputStatus" label="請求書出力" min-width="120"></el-table-column>
           </el-table>
+
+          <div class="table-pagination">
+            <el-pagination
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-sizes="[10, 20, 50]"
+              :total="total"
+              layout="total, sizes, prev, pager, next"
+              background
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
         </div>
       `,
       setup() {
@@ -2714,6 +2843,7 @@
             return true;
           });
         });
+        const pagination = useTablePagination(filteredRows);
         const goNew = () => router.push("/billing/edit");
         const escapeHtml = (value) => String(value ?? "")
           .replace(/&/g, "&amp;")
@@ -2774,7 +2904,7 @@
           document.body.removeChild(link);
           URL.revokeObjectURL(url);
         };
-        return { filters, filteredRows, Search, Plus, goNew, exportBillingList, formatCurrencyYen };
+        return { filters, filteredRows, ...pagination, Search, Plus, goNew, exportBillingList, formatCurrencyYen };
       }
     };
 
@@ -3145,13 +3275,25 @@
             </div>
           </div>
           <div class="case-toolbar"><el-button type="primary" :icon="Plus" @click="openNew">新規</el-button></div>
-          <el-table :data="filteredRows" border class="finance-list-table">
+          <el-table :data="pagedRows" border class="finance-list-table">
             <el-table-column prop="no" label="No." width="70"></el-table-column>
             <el-table-column label="操作" width="90"><template #default="scope"><a href="#" class="action-link action-edit" @click.prevent="editRow(scope.row)">変更</a></template></el-table-column>
             <el-table-column prop="name" label="取引先名" min-width="260"></el-table-column>
             <el-table-column prop="category" label="区分" width="140"></el-table-column>
             <el-table-column label="ステータス" width="110"><template #default="scope"><el-switch v-model="scope.row.active"></el-switch></template></el-table-column>
           </el-table>
+          <div class="table-pagination">
+            <el-pagination
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-sizes="[10, 20, 50]"
+              :total="total"
+              layout="total, sizes, prev, pager, next"
+              background
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
           <el-dialog v-model="visible" title="取引先管理" width="520px">
             <el-form label-width="110px">
               <el-form-item label="取引先名"><el-input v-model="editing.name"></el-input></el-form-item>
@@ -3176,6 +3318,7 @@
           (!filters.name || row.name.toLowerCase().includes(filters.name.toLowerCase())) &&
           (!filters.category || row.category === filters.category)
         ));
+        const pagination = useTablePagination(filteredRows);
         const visible = Vue.ref(false);
         const editing = Vue.reactive({ no: null, code: "", name: "", category: "顧客", active: true });
         const openNew = () => { Object.assign(editing, { no: null, code: "", name: "", category: "顧客", active: true }); visible.value = true; };
@@ -3194,7 +3337,7 @@
           }
           visible.value = false;
         };
-        return { rows, filters, filteredRows, visible, editing, Search, Plus, openNew, editRow, save };
+        return { rows, filters, filteredRows, ...pagination, visible, editing, Search, Plus, openNew, editRow, save };
       }
     };
 
@@ -3212,13 +3355,25 @@
             </div>
           </div>
           <div class="case-toolbar"><el-button type="primary" :icon="Plus" @click="openNew">新規</el-button></div>
-          <el-table :data="filteredRows" border class="finance-list-table">
+          <el-table :data="pagedRows" border class="finance-list-table">
             <el-table-column prop="no" label="No." width="70"></el-table-column>
             <el-table-column label="操作" width="90"><template #default="scope"><a href="#" class="action-link action-edit" @click.prevent="editRow(scope.row)">変更</a></template></el-table-column>
             <el-table-column prop="code" label="請求先コード" min-width="140"></el-table-column>
             <el-table-column prop="name" label="請求先名" min-width="220"></el-table-column>
             <el-table-column prop="note" label="備考" min-width="160"></el-table-column>
           </el-table>
+          <div class="table-pagination">
+            <el-pagination
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-sizes="[10, 20, 50]"
+              :total="total"
+              layout="total, sizes, prev, pager, next"
+              background
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
           <el-dialog v-model="visible" title="請求先管理" width="520px">
             <el-form label-width="110px">
               <el-form-item label="請求先コード"><el-input v-model="editing.code"></el-input></el-form-item>
@@ -3236,6 +3391,7 @@
           (!filters.code || row.code.toLowerCase().includes(filters.code.toLowerCase())) &&
           (!filters.name || row.name.toLowerCase().includes(filters.name.toLowerCase()))
         ));
+        const pagination = useTablePagination(filteredRows);
         const visible = Vue.ref(false);
         const editing = Vue.reactive({ no: null, code: "", name: "", note: "" });
         const openNew = () => { Object.assign(editing, { no: null, code: "", name: "", note: "" }); visible.value = true; };
@@ -3245,7 +3401,7 @@
           else rows.push({ ...editing, no: rows.length + 1 });
           visible.value = false;
         };
-        return { rows, filters, filteredRows, visible, editing, Search, Plus, openNew, editRow, save };
+        return { rows, filters, filteredRows, ...pagination, visible, editing, Search, Plus, openNew, editRow, save };
       }
     };
 
@@ -3263,7 +3419,7 @@
             </div>
           </div>
           <div class="case-toolbar"><el-button type="primary" :icon="Plus" @click="openNew">新規</el-button></div>
-          <el-table :data="filteredRows" border class="finance-list-table">
+          <el-table :data="pagedRows" border class="finance-list-table">
             <el-table-column prop="no" label="No." width="70"></el-table-column>
             <el-table-column label="操作" width="90"><template #default="scope"><a href="#" class="action-link action-edit" @click.prevent="editRow(scope.row)">変更</a></template></el-table-column>
             <el-table-column prop="code" label="項目コード" width="120"></el-table-column>
@@ -3271,6 +3427,18 @@
             <el-table-column label="デフォルト税区分" width="150"><template #default="scope">{{ taxName(scope.row.taxType) }}</template></el-table-column>
             <el-table-column prop="unitPrice" label="デフォルト単価" width="140"></el-table-column>
           </el-table>
+          <div class="table-pagination">
+            <el-pagination
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-sizes="[10, 20, 50]"
+              :total="total"
+              layout="total, sizes, prev, pager, next"
+              background
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
           <el-dialog v-model="visible" title="請求項目管理" width="560px">
             <el-form label-width="120px">
               <el-form-item label="項目コード"><el-input v-model="editing.code"></el-input></el-form-item>
@@ -3293,6 +3461,7 @@
           (!filters.code || row.code.toLowerCase().includes(filters.code.toLowerCase())) &&
           (!filters.name || row.nameJa.toLowerCase().includes(filters.name.toLowerCase()))
         ));
+        const pagination = useTablePagination(filteredRows);
         const visible = Vue.ref(false);
         const editing = Vue.reactive({ no: null, code: "", nameJa: "", taxType: "1", unitPrice: "" });
         const taxOptions = useTaxOptions();
@@ -3307,7 +3476,7 @@
           else rows.push({ ...editing, no: rows.length + 1 });
           visible.value = false;
         };
-        return { rows, filters, filteredRows, visible, editing, taxOptions, taxName, Search, Plus, openNew, editRow, save };
+        return { rows, filters, filteredRows, ...pagination, visible, editing, taxOptions, taxName, Search, Plus, openNew, editRow, save };
       }
     };
 
@@ -3325,7 +3494,7 @@
             </div>
           </div>
           <div class="case-toolbar"><el-button type="primary" :icon="Plus" @click="openNew">新規</el-button></div>
-          <el-table :data="filteredRows" border class="finance-list-table">
+          <el-table :data="pagedRows" border class="finance-list-table">
             <el-table-column prop="no" label="No." width="70"></el-table-column>
             <el-table-column label="操作" width="90"><template #default="scope"><a href="#" class="action-link action-edit" @click.prevent="editRow(scope.row)">変更</a></template></el-table-column>
             <el-table-column prop="code" label="区分コード" min-width="150"></el-table-column>
@@ -3334,6 +3503,18 @@
               <template #default="scope">{{ formatItems(scope.row.items) }}</template>
             </el-table-column>
           </el-table>
+          <div class="table-pagination">
+            <el-pagination
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-sizes="[10, 20, 50]"
+              :total="total"
+              layout="total, sizes, prev, pager, next"
+              background
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
           <el-dialog v-model="visible" title="区分マスタ管理" width="760px">
             <el-form label-width="110px">
               <el-form-item label="区分コード"><el-input v-model="editing.code"></el-input></el-form-item>
@@ -3370,6 +3551,7 @@
           (!filters.code || row.code.toLowerCase().includes(filters.code.toLowerCase())) &&
           (!filters.name || row.name.toLowerCase().includes(filters.name.toLowerCase()))
         ));
+        const pagination = useTablePagination(filteredRows);
         const visible = Vue.ref(false);
         const makeItem = (item = {}, index = 0) => ({
           no: index + 1,
@@ -3409,7 +3591,7 @@
           else rows.push(payload);
           visible.value = false;
         };
-        return { filters, filteredRows, visible, editing, Search, Plus, Delete, openNew, editRow, appendItem, removeItem, formatItems, save };
+        return { filters, filteredRows, ...pagination, visible, editing, Search, Plus, Delete, openNew, editRow, appendItem, removeItem, formatItems, save };
       }
     };
 
@@ -3427,13 +3609,25 @@
             </div>
           </div>
           <div class="case-toolbar"><el-button type="primary" :icon="Plus" @click="openNew">新規</el-button></div>
-          <el-table :data="filteredRows" border class="finance-list-table">
+          <el-table :data="pagedRows" border class="finance-list-table">
             <el-table-column prop="no" label="No." width="70"></el-table-column>
             <el-table-column label="操作" width="90"><template #default="scope"><a href="#" class="action-link action-edit" @click.prevent="editRow(scope.row)">変更</a></template></el-table-column>
             <el-table-column prop="code" label="場所コード" width="140"></el-table-column>
             <el-table-column prop="city" label="港・都市名(英)" min-width="180"></el-table-column>
             <el-table-column prop="country" label="国コード" width="120"></el-table-column>
           </el-table>
+          <div class="table-pagination">
+            <el-pagination
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-sizes="[10, 20, 50]"
+              :total="total"
+              layout="total, sizes, prev, pager, next"
+              background
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
           <el-dialog v-model="visible" title="港・場所マスタ" width="520px">
             <el-form label-width="110px">
               <el-form-item label="場所コード"><el-input v-model="editing.code"></el-input></el-form-item>
@@ -3451,6 +3645,7 @@
           (!filters.code || row.code.toLowerCase().includes(filters.code.toLowerCase())) &&
           (!filters.name || row.city.toLowerCase().includes(filters.name.toLowerCase()))
         ));
+        const pagination = useTablePagination(filteredRows);
         const visible = Vue.ref(false);
         const editing = Vue.reactive({ no: null, code: "", city: "", country: "" });
         const openNew = () => { Object.assign(editing, { no: null, code: "", city: "", country: "" }); visible.value = true; };
@@ -3460,7 +3655,7 @@
           else rows.push({ ...editing, no: rows.length + 1 });
           visible.value = false;
         };
-        return { rows, filters, filteredRows, visible, editing, Search, Plus, openNew, editRow, save };
+        return { rows, filters, filteredRows, ...pagination, visible, editing, Search, Plus, openNew, editRow, save };
       }
     };
 
@@ -3478,13 +3673,25 @@
             </div>
           </div>
           <div class="case-toolbar"><el-button type="primary" :icon="Plus" @click="openNew">新規</el-button></div>
-          <el-table :data="filteredRows" border class="finance-list-table">
+          <el-table :data="pagedRows" border class="finance-list-table">
             <el-table-column prop="no" label="No." width="70"></el-table-column>
             <el-table-column label="操作" width="90"><template #default="scope"><a href="#" class="action-link action-edit" @click.prevent="editRow(scope.row)">変更</a></template></el-table-column>
             <el-table-column prop="imo" label="コールサイン/IMO" min-width="150"></el-table-column>
             <el-table-column prop="vesselName" label="船名" min-width="200"></el-table-column>
             <el-table-column prop="shippingCode" label="船社コード" width="120"></el-table-column>
           </el-table>
+          <div class="table-pagination">
+            <el-pagination
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-sizes="[10, 20, 50]"
+              :total="total"
+              layout="total, sizes, prev, pager, next"
+              background
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
           <el-dialog v-model="visible" title="船名マスタ" width="520px">
             <el-form label-width="120px">
               <el-form-item label="コールサイン/IMO"><el-input v-model="editing.imo"></el-input></el-form-item>
@@ -3502,6 +3709,7 @@
           (!filters.code || row.imo.toLowerCase().includes(filters.code.toLowerCase()) || row.shippingCode.toLowerCase().includes(filters.code.toLowerCase())) &&
           (!filters.name || row.vesselName.toLowerCase().includes(filters.name.toLowerCase()))
         ));
+        const pagination = useTablePagination(filteredRows);
         const visible = Vue.ref(false);
         const editing = Vue.reactive({ no: null, imo: "", vesselName: "", shippingCode: "" });
         const openNew = () => { Object.assign(editing, { no: null, imo: "", vesselName: "", shippingCode: "" }); visible.value = true; };
@@ -3511,7 +3719,7 @@
           else rows.push({ ...editing, no: rows.length + 1 });
           visible.value = false;
         };
-        return { rows, filters, filteredRows, visible, editing, Search, Plus, openNew, editRow, save };
+        return { rows, filters, filteredRows, ...pagination, visible, editing, Search, Plus, openNew, editRow, save };
       }
     };
 
@@ -3600,7 +3808,7 @@
             </div>
           </div>
           <div class="case-toolbar"><el-button type="primary" :icon="Plus" @click="openNew">新規</el-button></div>
-          <el-table :data="filteredRows" border class="finance-list-table">
+          <el-table :data="pagedRows" border class="finance-list-table">
             <el-table-column prop="no" label="No." width="70"></el-table-column>
             <el-table-column label="操作" width="140">
               <template #default="scope">
@@ -3614,6 +3822,18 @@
             <el-table-column prop="name" label="テンプレート名" min-width="260"></el-table-column>
             <el-table-column prop="updatedAt" label="最終更新日" width="140"></el-table-column>
           </el-table>
+          <div class="table-pagination">
+            <el-pagination
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-sizes="[10, 20, 50]"
+              :total="total"
+              layout="total, sizes, prev, pager, next"
+              background
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
           <el-dialog v-model="visible" title="請求書テンプレート管理" width="1120px">
             <el-form label-width="130px">
               <div class="billing-form-grid">
@@ -3697,6 +3917,7 @@
           (!filters.category || row.category === filters.category) &&
           (!filters.name || row.name.toLowerCase().includes(filters.name.toLowerCase()))
         ));
+        const pagination = useTablePagination(filteredRows);
         const visible = Vue.ref(false);
         const editing = Vue.reactive({
           no: null,
@@ -3747,6 +3968,7 @@
           rows,
           filters,
           filteredRows,
+          ...pagination,
           visible,
           editing,
           Search,
@@ -3799,7 +4021,7 @@
 
           <div class="case-toolbar"><el-button type="primary" :icon="Plus" @click="openNew">新規</el-button></div>
 
-          <el-table :data="filteredRows" border class="finance-list-table" style="width: 100%">
+          <el-table :data="pagedRows" border class="finance-list-table" style="width: 100%">
             <el-table-column prop="no" label="No." width="70"></el-table-column>
             <el-table-column label="操作" min-width="150">
               <template #default="scope">
@@ -3823,6 +4045,19 @@
               </template>
             </el-table-column>
           </el-table>
+
+          <div class="table-pagination">
+            <el-pagination
+              :current-page="currentPage"
+              :page-size="pageSize"
+              :page-sizes="[10, 20, 50]"
+              :total="total"
+              layout="total, sizes, prev, pager, next"
+              background
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
         </div>
       `,
       setup() {
@@ -3833,6 +4068,7 @@
           (!filters.username || row.username.toLowerCase().includes(filters.username.toLowerCase())) &&
           (!filters.role || row.role === filters.role)
         ));
+        const pagination = useTablePagination(filteredRows);
         const openNew = () => router.push("/user-management/new");
         const editRow = (row) => router.push({ path: "/user-management/new", query: { no: row.no } });
         const resetPassword = async (row) => {
@@ -3848,7 +4084,7 @@
           if (targetIndex >= 0) rows.splice(targetIndex, 1);
           rows.forEach((item, itemIndex) => { item.no = itemIndex + 1; });
         };
-        return { filters, filteredRows, Search, Plus, Delete, openNew, editRow, resetPassword, removeRow };
+        return { filters, filteredRows, ...pagination, Search, Plus, Delete, openNew, editRow, resetPassword, removeRow };
       }
     };
 
@@ -3962,7 +4198,7 @@ const CustomsListPage = {
         </div>
       </div>
 
-      <el-table :data="filteredRows" stripe border style="width: 100%">
+      <el-table :data="pagedRows" stripe border style="width: 100%">
         <el-table-column label="No." width="60">
           <template #default="scope">{{ scope.$index + 1 }}</template>
         </el-table-column>
@@ -3983,6 +4219,20 @@ const CustomsListPage = {
         </el-table-column>
         <el-table-column prop="issuedAt" label="発行日" width="120"></el-table-column>
       </el-table>
+
+      <div class="table-pagination">
+        <el-pagination
+          :current-page="currentPage"
+          :page-size="pageSize"
+          :page-sizes="[10, 20, 50]"
+          :total="total"
+          :pager-count="7"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
     </div>
   `,
   setup() {
@@ -4009,9 +4259,10 @@ const CustomsListPage = {
         return true;
       });
     });
-    const goOutput = (row) => router.push({ path: "/customs/create", query: { caseNo: row.caseNo } });
-    const goDetail = (row) => router.push({ path: "/customs/create", query: { caseNo: row.caseNo, readonly: "1" } });
-    return { filters, filteredRows, goOutput, goDetail, Search };
+    const pagination = useTablePagination(filteredRows);
+    const goOutput = (row) => router.push({ path: "/customs/create", query: { caseNo: row.caseNo, from: "/cases/customs" } });
+    const goDetail = (row) => router.push({ path: "/customs/create", query: { caseNo: row.caseNo, readonly: "1", from: "/cases/customs" } });
+    return { filters, filteredRows, ...pagination, goOutput, goDetail, Search };
   }
 };
 
@@ -4031,10 +4282,7 @@ const CustomsNewPage = {
           <div class="form-section">
             <div class="business-form-grid plain-form-grid">
               <el-form-item label="案件番号" class="full-row">
-                <div class="case-picker-row">
-                  <el-input v-model="selectedCaseNo" readonly placeholder="案件を選択してください"></el-input>
-                  <el-button v-if="!isReadonly" type="primary" @click="caseDialogVisible = true">案件選択</el-button>
-                </div>
+                <el-input v-model="selectedCaseNo" readonly placeholder="案件を選択してください"></el-input>
               </el-form-item>
             </div>
           </div>
@@ -4430,7 +4678,7 @@ const CustomsNewPage = {
       applyCase(caseNo);
       caseDialogVisible.value = false;
     };
-    const goBack = () => router.push("/cases/customs");
+    const goBack = () => router.push(String(route.query.from || "/cases/customs"));
     const syncExportAllFlag = () => {
       exportSelection.all = exportSelection.docs.length === 3;
     };
@@ -4486,9 +4734,13 @@ const CustomsNewPage = {
     const grossWeightTotal = Vue.computed(() => containerInfoRows.value.reduce((sum, item) => sum + Number(item.grossWeight || 0), 0).toLocaleString());
     const volumeTotal = Vue.computed(() => containerInfoRows.value.reduce((sum, item) => sum + Number(item.volumeM3 || 0), 0).toFixed(3));
 
-    if (route.query.caseNo) {
-      applyCase(route.query.caseNo);
-    }
+    Vue.watch(
+      () => route.query.caseNo,
+      (caseNo) => {
+        applyCase(caseNo || "");
+      },
+      { immediate: true }
+    );
 
     return {
       activeCase,
@@ -4574,7 +4826,7 @@ const EstimateListPage = {
         <div class="table-note">Excel見積書をベースにした見積管理です。案件化前の顧客向け报价に利用します。</div>
       </div>
 
-      <el-table :data="filteredRows" stripe border style="width: 100%">
+      <el-table :data="pagedRows" stripe border style="width: 100%">
         <el-table-column label="No." width="60">
           <template #default="scope">{{ scope.$index + 1 }}</template>
         </el-table-column>
@@ -4606,15 +4858,51 @@ const EstimateListPage = {
         </el-table-column>
         <el-table-column prop="updatedAt" label="更新日" width="120"></el-table-column>
       </el-table>
+
+      <div class="table-pagination">
+        <el-pagination
+          :current-page="currentPage"
+          :page-size="pageSize"
+          :page-sizes="[10, 20, 50]"
+          :total="total"
+          layout="total, sizes, prev, pager, next"
+          background
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
     </div>
   `,
   setup() {
     const router = VueRouter.useRouter();
-    const rows = Vue.ref([
-      { no: 1, quoteNo: "QT-2026-001", clientName: "塩沢金属株式会社", subject: "METAL SCRAP", workDescription: "海上運賃・陸上運送料", portFrom: "YOKOHAMA", portTo: "PORT QASIM", containerType: "40HQ", unitBudget1: "¥ 338,700", validUntil: "2026/04/30", owner: "佐藤 美咲", status: "出力済", updatedAt: "2026/04/16" },
-      { no: 2, quoteNo: "QT-2026-002", clientName: "野田金属産業株式会社", subject: "アルミ SCRAP", workDescription: "海上運賃・陸上運送料・通関料", portFrom: "SENDAI", portTo: "香港", containerType: "40HC", unitBudget1: "¥ 303,080", validUntil: "都度確認", owner: "高橋 優", status: "未出力", updatedAt: "2026/04/16" },
-      { no: 3, quoteNo: "QT-2026-003", clientName: "明川科技", subject: "NEW PAPER PULP", workDescription: "海上運賃・陸上運送料・通関料", portFrom: "YOKOHAMA", portTo: "SANSHAN", containerType: "40HQ", unitBudget1: "¥ 287,680", validUntil: "2026/05/15", owner: "中村 亮", status: "未出力", updatedAt: "2026/04/17" }
-    ]);
+    const estimateSeedRows = [
+      { clientName: "塩沢金属株式会社", subject: "METAL SCRAP", workDescription: "海上運賃・陸上運送料", portFrom: "YOKOHAMA", portTo: "PORT QASIM", containerType: "40HQ", unitBudget1: "¥ 338,700", validUntil: "2026/04/30", owner: "佐藤 美咲", status: "出力済", updatedAt: "2026/04/16" },
+      { clientName: "野田金属産業株式会社", subject: "アルミ SCRAP", workDescription: "海上運賃・陸上運送料・通関料", portFrom: "SENDAI", portTo: "香港", containerType: "40HC", unitBudget1: "¥ 303,080", validUntil: "都度確認", owner: "高橋 優", status: "未出力", updatedAt: "2026/04/16" },
+      { clientName: "明川科技", subject: "NEW PAPER PULP", workDescription: "海上運賃・陸上運送料・通関料", portFrom: "YOKOHAMA", portTo: "SANSHAN", containerType: "40HQ", unitBudget1: "¥ 287,680", validUntil: "2026/05/15", owner: "中村 亮", status: "未出力", updatedAt: "2026/04/17" },
+      { clientName: "東洋資源株式会社", subject: "COPPER SCRAP", workDescription: "海上運賃・通関料", portFrom: "TOKYO", portTo: "NINGBO", containerType: "20GP", unitBudget1: "¥ 198,400", validUntil: "2026/05/10", owner: "佐藤 美咲", status: "出力済", updatedAt: "2026/04/18" },
+      { clientName: "日高金属株式会社", subject: "MIXED METAL", workDescription: "海上運賃・陸送・保管料", portFrom: "NAGOYA", portTo: "BUSAN", containerType: "40HQ", unitBudget1: "¥ 315,900", validUntil: "2026/05/08", owner: "高橋 優", status: "未出力", updatedAt: "2026/04/18" },
+      { clientName: "港南通商株式会社", subject: "PVC RESIN", workDescription: "海上運賃・書類作成", portFrom: "KOBE", portTo: "MANILA", containerType: "20GP", unitBudget1: "¥ 176,300", validUntil: "2026/05/20", owner: "中村 亮", status: "出力済", updatedAt: "2026/04/19" }
+    ];
+    const rows = Vue.ref(
+      Array.from({ length: 26 }, (_, index) => {
+        const base = estimateSeedRows[index % estimateSeedRows.length];
+        return {
+          no: index + 1,
+          quoteNo: "QT-2026-" + String(index + 1).padStart(3, "0"),
+          clientName: base.clientName,
+          subject: base.subject,
+          workDescription: base.workDescription,
+          portFrom: base.portFrom,
+          portTo: base.portTo,
+          containerType: base.containerType,
+          unitBudget1: base.unitBudget1,
+          validUntil: base.validUntil,
+          owner: base.owner,
+          status: base.status,
+          updatedAt: base.updatedAt
+        };
+      })
+    );
     const filters = Vue.reactive({ quoteNo: "", clientName: "", subject: "", portTo: "", owner: "", status: "" });
     const filteredRows = Vue.computed(() => {
       return rows.value.filter(r => {
@@ -4627,6 +4915,7 @@ const EstimateListPage = {
         return true;
       });
     });
+    const pagination = useTablePagination(filteredRows);
     const statusTagType = (s) => {
       if (s === "出力済") return "success";
       if (s === "未出力") return "info";
@@ -4637,7 +4926,7 @@ const EstimateListPage = {
     const goDetail = (row) => router.push({ path: "/estimate/new", query: { quoteNo: row.quoteNo, readonly: "1" } });
     const copyEstimate = (row) => router.push({ path: "/estimate/new", query: { quoteNo: row.quoteNo, mode: "copy" } });
     const exportEstimate = (row) => ElementPlus.ElMessage.success("Excel出力（Mock）：" + row.quoteNo);
-    return { filters, filteredRows, statusTagType, goNew, goEdit, goDetail, copyEstimate, exportEstimate, Search, Plus };
+    return { filters, filteredRows, ...pagination, statusTagType, goNew, goEdit, goDetail, copyEstimate, exportEstimate, Search, Plus };
   }
 };
 
@@ -5145,9 +5434,9 @@ const EstimateNewPage = {
         <div class="app-shell">
           <header class="topbar">
             <div class="brand">
-              <div class="brand-mark">YU</div>
+              <div class="brand-mark">RX</div>
               <div class="brand-text">
-                <strong>于の通関管理システム</strong>
+                <strong>瑞祥通関管理システム</strong>
                 <span>Case / Finance / Request Administration Console</span>
               </div>
             </div>
@@ -5215,10 +5504,6 @@ const EstimateNewPage = {
                     <el-menu-item index="/cases/customs">
                       <el-icon><Document /></el-icon>
                       <span>通関一覧</span>
-                    </el-menu-item>
-                    <el-menu-item index="/customs/create">
-                      <el-icon><Plus /></el-icon>
-                      <span>通関書類出力</span>
                     </el-menu-item>
                   </el-sub-menu>
 
