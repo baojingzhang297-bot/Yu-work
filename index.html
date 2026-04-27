@@ -1506,15 +1506,15 @@
                     </div>
                   </el-form-item>
 
-                  <el-form-item label="VOY No.">
-                    <el-input v-model="form.voyNo"></el-input>
-                  </el-form-item>
-
                   <el-form-item label="船名" class="full-row">
                     <div class="inline-pair">
                       <el-input v-model="form.vesselCode" placeholder="code"></el-input>
                       <el-input v-model="form.vesselName" placeholder="名称"></el-input>
                     </div>
+                  </el-form-item>
+
+                  <el-form-item label="VOY No.">
+                    <el-input v-model="form.voyNo"></el-input>
                   </el-form-item>
 
                   <el-form-item label="ETD（入港）">
@@ -4406,7 +4406,10 @@ const CustomsNewPage = {
                   </el-select>
                 </el-form-item>
                 <el-form-item label="No. of Original B/L">
-                  <el-input v-model="blForm.originalBLCount"></el-input>
+                  <el-select v-model="blForm.originalBLCount">
+                    <el-option label="ONE (1)" value="ONE (1)"></el-option>
+                    <el-option label="ONE (3)" value="ONE (3)"></el-option>
+                  </el-select>
                 </el-form-item>
                 <el-form-item label="備考" class="full-row">
                   <el-input v-model="blForm.remarks" type="textarea" :rows="2"></el-input>
@@ -4888,7 +4891,7 @@ const EstimateListPage = {
         const base = estimateSeedRows[index % estimateSeedRows.length];
         return {
           no: index + 1,
-          quoteNo: "QT-2026-" + String(index + 1).padStart(3, "0"),
+          quoteNo: "M-2026-" + String(index + 1).padStart(5, "0"),
           clientName: base.clientName,
           subject: base.subject,
           workDescription: base.workDescription,
@@ -5067,6 +5070,15 @@ const EstimateNewPage = {
                     <el-table-column label="単価" width="120">
                       <template #default="scope"><el-input v-model.number="scope.row.unitPrice"></el-input></template>
                     </el-table-column>
+                    <el-table-column v-if="section.key === '海上運賃'" label="通貨" width="100">
+                      <template #default="scope">
+                        <el-select v-model="scope.row.currency">
+                          <el-option label="円" value="JPY"></el-option>
+                          <el-option label="ドル" value="USD"></el-option>
+                          <el-option label="元" value="CNY"></el-option>
+                        </el-select>
+                      </template>
+                    </el-table-column>
                     <el-table-column label="単位" width="90">
                       <template #default="scope"><el-input v-model="scope.row.unit"></el-input></template>
                     </el-table-column>
@@ -5092,11 +5104,14 @@ const EstimateNewPage = {
           <div class="form-section no-top-line">
             <h3 class="form-section-title">本数別予算金額</h3>
             <div class="sub-card">
-              <div class="search-label" style="margin-bottom:10px;">換算</div>
               <div class="business-form-grid" :class="{ 'readonly-block': isReadonly }" style="padding:0; background:transparent; border:none;">
                 <el-form-item label="換算レート">
                   <el-input v-model="form.exchangeRate"></el-input>
                 </el-form-item>
+              </div>
+              <div v-if="!isReadonly" class="finance-tools" style="margin:10px 0 10px;">
+                <div></div>
+                <el-button type="primary" plain @click="addBudgetRow">追加行</el-button>
               </div>
               <el-table :data="budgetRows" border class="new-case-table" style="width:100%; margin-top:8px;">
                 <el-table-column label="区分" min-width="180">
@@ -5106,10 +5121,15 @@ const EstimateNewPage = {
                   <template #default="scope"><el-input v-model="scope.row.condition"></el-input></template>
                 </el-table-column>
                 <el-table-column label="予算金額 /本" min-width="160">
-                  <template #default="scope">{{ formatYen(scope.row.amount) }}</template>
+                  <template #default="scope"><el-input v-model.number="scope.row.amount"></el-input></template>
                 </el-table-column>
                 <el-table-column label="備考" min-width="180">
                   <template #default="scope"><el-input v-model="scope.row.note"></el-input></template>
+                </el-table-column>
+                <el-table-column v-if="!isReadonly" label="削除" width="80" fixed="right">
+                  <template #default="scope">
+                    <el-button circle type="danger" plain :icon="Delete" @click="removeBudgetRow(scope.$index)"></el-button>
+                  </template>
                 </el-table-column>
               </el-table>
             </div>
@@ -5208,7 +5228,7 @@ const EstimateNewPage = {
     const base = sheetTemplates[route.query.quoteNo] || sheetTemplates["QT-2026-001"];
     const form = Vue.reactive(JSON.parse(JSON.stringify(base)));
     if (!isEdit.value && !isCopy.value) {
-      form.quoteNo = "QT-2026-004";
+      form.quoteNo = "M-2026-00001";
       form.quoteDate = new Date().toISOString().slice(0, 10).replace(/-/g, "/");
       form.status = "未出力";
       form.clientName = "";
@@ -5216,14 +5236,14 @@ const EstimateNewPage = {
       form.clientTel = "";
       form.clientFax = "";
     } else if (isCopy.value) {
-      form.quoteNo = "QT-2026-004";
+      form.quoteNo = "M-2026-00001";
       form.quoteDate = new Date().toISOString().slice(0, 10).replace(/-/g, "/");
       form.status = "未出力";
     }
     const costItems = Vue.ref((base.costItems || []).map((item) => ({ ...item })));
     const formatYen = (v) => "¥ " + Number(v || 0).toLocaleString();
     const calcItemAmount = (item, count) => {
-      const converted = item.currency === "USD" ? Number(item.unitPrice || 0) * Number(form.exchangeRate || 0) : Number(item.unitPrice || 0);
+      const converted = ["USD", "CNY"].includes(item.currency) ? Number(item.unitPrice || 0) * Number(form.exchangeRate || 0) : Number(item.unitPrice || 0);
       const raw = item.unit === "/本" ? converted * count : converted;
       return item.taxType === "課税" ? Math.round(raw * 1.1) : Math.round(raw);
     };
@@ -5247,17 +5267,23 @@ const EstimateNewPage = {
       if (index >= 0) costItems.value.splice(index, 1);
     };
     const budgetRows = Vue.reactive([
-      { count: 1, label: "1本輸出の場合", condition: "台貫料を除く", note: "税込" },
-      { count: 2, label: "2本輸出の場合", condition: "台貫料を除く", note: "税込" },
-      { count: 3, label: "3本輸出の場合", condition: "台貫料を除く", note: "税込" }
+      { count: 1, label: "1本輸出の場合", condition: "台貫料を除く", amount: calcBudgetPerUnit(1), note: "税込" },
+      { count: 2, label: "2本輸出の場合", condition: "台貫料を除く", amount: calcBudgetPerUnit(2), note: "税込" },
+      { count: 3, label: "3本輸出の場合", condition: "台貫料を除く", amount: calcBudgetPerUnit(3), note: "税込" }
     ]);
-    const updateBudgetAmounts = () => {
-      budgetRows.forEach((row) => {
-        row.amount = calcBudgetPerUnit(row.count);
+    const addBudgetRow = () => {
+      const nextCount = budgetRows.length + 1;
+      budgetRows.push({
+        count: nextCount,
+        label: `${nextCount}本輸出の場合`,
+        condition: "台貫料を除く",
+        amount: calcBudgetPerUnit(nextCount),
+        note: "税込"
       });
     };
-    updateBudgetAmounts();
-    Vue.watch(() => [form.exchangeRate, ...costItems.value.map((item) => [item.unitPrice, item.taxType, item.unit, item.category])], updateBudgetAmounts, { deep: true });
+    const removeBudgetRow = (index) => {
+      budgetRows.splice(index, 1);
+    };
     const buildEstimateHtml = () => {
       const escapeHtml = (value) => String(value ?? "")
         .replace(/&/g, "&amp;")
@@ -5388,7 +5414,7 @@ const EstimateNewPage = {
       form, isEdit, isCopy, isReadonly, costItems,
       estimateSections, costItemsByCategory, budgetRows,
       formatYen, calcItemAmount, calcBudgetPerUnit,
-      addCostItem, removeCostItem,
+      addCostItem, removeCostItem, addBudgetRow, removeBudgetRow,
       saveEstimate, outputEstimate, goBack,
       ArrowLeft, Delete
     };
